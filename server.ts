@@ -23,11 +23,11 @@ const fastifyConfig = {
 }
 
 const middlewareConfig: MiddlewareConfig = {
-  channelSecret: process.env.CHANNEL_SECRET || '',
+  channelSecret: process.env.LINE_CHANNEL_SECRET || '',
 }
 
 const clientConfig: ClientConfig = {
-  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN || '',
+  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
 }
 const client = new messagingApi.MessagingApiClient(clientConfig)
 
