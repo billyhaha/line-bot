@@ -1,35 +1,35 @@
-import fastify, {
-  FastifyInstance,
-  FastifyReply,
-  FastifyRequest,
-  FastifyServerOptions,
-} from 'fastify'
-import dotenv from 'dotenv'
-import line, {
+// Import all dependencies, mostly using destructuring for better view.
+import {
   ClientConfig,
   MessageAPIResponseBase,
   messagingApi,
-  MiddlewareConfig,
   middleware,
+  MiddlewareConfig,
   webhook,
   HTTPFetchError,
 } from '@line/bot-sdk'
 
+import express, { Application, Request, Response } from 'express'
+import dotenv from 'dotenv'
+
 dotenv.config()
 
-const fastifyConfig = {
-  port: Number(process.env.FASTIFY_PORT) || 3000,
-  host: process.env.FASTIFY_HOST || '0.0.0.0',
+// Setup all LINE client and Express configurations.
+const clientConfig: ClientConfig = {
+  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
 }
 
 const middlewareConfig: MiddlewareConfig = {
   channelSecret: process.env.LINE_CHANNEL_SECRET || '',
 }
 
-const clientConfig: ClientConfig = {
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
-}
+const PORT = process.env.PORT || 3000
+
+// Create a new LINE SDK client.
 const client = new messagingApi.MessagingApiClient(clientConfig)
+
+// Create a new Express application.
+const app: Application = express()
 
 // Function handler to receive the text.
 const textEventHandler = async (
@@ -60,72 +60,57 @@ const textEventHandler = async (
   })
 }
 
-export const serverOf = (): FastifyInstance => {
-  const server = fastify({
-    logger: {
-      transport: {
-        target: 'pino-pretty',
-      },
-      level: 'debug',
-    },
+// Register the LINE middleware.
+// As an alternative, you could also pass the middleware in the route handler, which is what is used here.
+// app.use(middleware(middlewareConfig));
+
+// Route handler to receive webhook events.
+// This route is used to receive connection tests.
+app.get('/', async (req: Request, res: Response): Promise<void> => {
+  res.status(200).json({
+    status: 'success',
+    message: 'Connected successfully!',
   })
-  server.get(
-    '/',
-    async (request: FastifyRequest, reply: FastifyReply): Promise<Response> => {
-      return reply.code(200).send({
-        status: 'success',
-        message: 'Connected successfully!',
-      })
-    }
-  )
+})
 
-  //line webhoot
-  server.post(
-    '/callback',
-    { preHandler: middleware(middlewareConfig) as any },
-    async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
-      const callbackRequest: webhook.CallbackRequest =
-        req.body as webhook.CallbackRequest
-      const events: webhook.Event[] = callbackRequest.events || []
+// This route is used for the Webhook.
+app.post(
+  '/callback',
+  middleware(middlewareConfig),
+  async (req: Request, res: Response): Promise<void> => {
+    const callbackRequest: webhook.CallbackRequest = req.body
+    const events: webhook.Event[] = callbackRequest.events!
 
-      // Process all the received events asynchronously.
-      const results = await Promise.all(
-        events.map(async (event: webhook.Event) => {
-          try {
-            await textEventHandler(event)
-          } catch (err: unknown) {
-            if (err instanceof HTTPFetchError) {
-              console.error(err.status)
-              console.error(err.headers?.get('x-line-request-id'))
-              console.error(err.body)
-            } else if (err instanceof Error) {
-              console.error(err)
-            }
-
-            // Handle error in the map and don't return reply here.
-            return {
-              status: 'error',
-              error: err,
-            }
+    // Process all the received events asynchronously.
+    const results = await Promise.all(
+      events.map(async (event: webhook.Event) => {
+        try {
+          await textEventHandler(event)
+        } catch (err: unknown) {
+          if (err instanceof HTTPFetchError) {
+            console.error(err.status)
+            console.error(err.headers.get('x-line-request-id'))
+            console.error(err.body)
+          } else if (err instanceof Error) {
+            console.error(err)
           }
-        })
-      )
 
-      // Return a successful message.
-      reply.code(200).send({
-        status: 'success',
-        results,
+          // Return an error message.
+          return res.status(500).json({
+            status: 'error',
+          })
+        }
       })
-    }
-  )
+    )
+    // Return a successful message.
+    res.status(200).json({
+      status: 'success',
+      results,
+    })
+  }
+)
 
-  return server
-}
-
-export const serverStart = async (
-  server: FastifyInstance
-): Promise<FastifyInstance> => {
-  await server.listen(fastifyConfig)
-
-  return server
-}
+// Create a server and listen to it.
+app.listen(PORT, () => {
+  console.log(`Application is live and listening on port ${PORT}`)
+})
